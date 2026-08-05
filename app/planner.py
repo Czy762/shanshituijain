@@ -7,8 +7,9 @@ import uuid
 _sessions: Dict[str, Dict[str, Any]] = {}
 
 class MealPlanner:
-    def __init__(self, index: RecipeIndex):
+    def __init__(self, index: RecipeIndex, llm_generate=None):
         self.index = index
+        self.llm_generate = llm_generate
 
     def _filter_fn(self, profile: Dict[str, Any], constraints: Dict[str, Any]):
         allergies = profile.get("allergies", [])
@@ -39,12 +40,12 @@ class MealPlanner:
         if not results:
             return {"ok": False, "reason": "未找到满足硬约束的菜谱"}
         # choose top 1 as main, and try to add a side if available (simple heuristic)
-        main = results[0]["recipe"]
+        main = results[0]["recipe"] if isinstance(results[0], dict) and "recipe" in results[0] else results[0]
         plan = {"id": str(uuid.uuid4()), "main": main}
         # find side with different primary ingredient and short time
         side = None
         for r in results[1:]:
-            candidate = r["recipe"]
+            candidate = r["recipe"] if isinstance(r, dict) and "recipe" in r else r
             if candidate["id"] != main["id"] and candidate.get("cook_time_min", 999) <= max(15, main.get("cook_time_min", 999)):
                 side = candidate
                 break
@@ -52,6 +53,16 @@ class MealPlanner:
             plan["side"] = side
         # nutrition aggregation
         plan["nutrition_estimate"] = self._aggregate_nutrition([main] + ([side] if side else []))
+
+        # generate brief explanation via LLM if available
+        if self.llm_generate:
+            prompt = f"请用中文简要说明这个餐单的优点：主菜：{main.get('name')}；配菜：{side.get('name') if side else '无'}；并指出适配的人群与注意事项。"
+            try:
+                explanation = self.llm_generate(prompt, backend=None)
+                plan["explanation"] = explanation
+            except Exception:
+                plan["explanation"] = ""
+
         return {"ok": True, "plan": plan}
 
     def _aggregate_nutrition(self, recipes: List[Dict[str, Any]]):

@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -6,13 +7,35 @@ from .recipes import RecipeIndex, load_recipes
 from .planner import MealPlanner
 from .schemas import UserProfile, PlanRequest, DialogueRequest
 
+# optional modules
+USE_SEMANTIC = True
+try:
+    from .embeddings import SemanticIndex
+except Exception:
+    SemanticIndex = None
+
+try:
+    from .llm import generate_text
+    LLM_AVAILABLE = True
+except Exception:
+    generate_text = None
+    LLM_AVAILABLE = False
+
 app = FastAPI(title="Personalized Meal Planning Agent")
 
 # Load sample recipes at startup (scripts/build_index.py will generate if you replace data)
 RECIPES_PATH = "data/recipes.json"
 recipes = load_recipes(RECIPES_PATH)
-index = RecipeIndex(recipes)
-planner = MealPlanner(index)
+
+if SemanticIndex is not None:
+    try:
+        index = SemanticIndex(recipes)
+    except Exception:
+        index = RecipeIndex(recipes)
+else:
+    index = RecipeIndex(recipes)
+
+planner = MealPlanner(index, llm_generate=generate_text if LLM_AVAILABLE else None)
 
 @app.get("/health")
 def health():
